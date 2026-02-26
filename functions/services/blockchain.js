@@ -1,5 +1,5 @@
 const { RPC_POLYGON } = require('../secret/keys');
-const { TOKENS, ORACLES, Q96 } = require('../config/constants');
+const { POLYGON_TOKENS, UNISWAP_V3_POLYGON, CHAINLINK_POLYGON, Q96 } = require('../config/constants');
 const {
     normalizeAddress,
     encodeAddress,
@@ -55,8 +55,8 @@ async function ethCall(to, data) {
  */
 async function getMarketPrices() {
     const [wethHex, wbtcHex] = await Promise.all([
-        ethCall(ORACLES.WETH, '0x50d25bcd'), // latestAnswer()
-        ethCall(ORACLES.WBTC, '0x50d25bcd')
+        ethCall(CHAINLINK_POLYGON.WETH_USD, '0x50d25bcd'), // latestAnswer()
+        ethCall(CHAINLINK_POLYGON.WBTC_USD, '0x50d25bcd')
     ]);
 
     const formatPrice = (hex) => Number(BigInt(hex)) / 1e8; // Chainlink USD feeds have 8 decimals
@@ -92,8 +92,8 @@ async function getERC20Balance(tokenAddress, walletAddress, decimals) {
  */
 async function getWalletBalances(walletAddress) {
     const [weth, wbtc, maticHex] = await Promise.all([
-        getERC20Balance(TOKENS.WETH.address, walletAddress, TOKENS.WETH.decimals),
-        getERC20Balance(TOKENS.WBTC.address, walletAddress, TOKENS.WBTC.decimals),
+        getERC20Balance(POLYGON_TOKENS.WETH.address, walletAddress, POLYGON_TOKENS.WETH.decimals),
+        getERC20Balance(POLYGON_TOKENS.WBTC.address, walletAddress, POLYGON_TOKENS.WBTC.decimals),
         rpcCall('eth_getBalance', [walletAddress, 'latest'])
     ]);
 
@@ -143,14 +143,14 @@ async function getPoolBalances(walletAddress) {
     let poolWeth = 0;
     let poolWbtc = 0;
 
-    const nftCountHex = await ethCall(TOKENS.POS_MANAGER, `0x70a08231${encodeAddress(walletAddress)}`);
+    const nftCountHex = await ethCall(UNISWAP_V3_POLYGON.POS_MANAGER, `0x70a08231${encodeAddress(walletAddress)}`);
     const nftCount = parseInt(nftCountHex, 16) || 0;
 
     for (let i = 0; i < nftCount; i++) {
-        const tokenIdHex = await ethCall(TOKENS.POS_MANAGER, `0x2f745c59${encodeAddress(walletAddress)}${encodeUint256(i)}`);
+        const tokenIdHex = await ethCall(UNISWAP_V3_POLYGON.POS_MANAGER, `0x2f745c59${encodeAddress(walletAddress)}${encodeUint256(i)}`);
         const tokenId = decodeUint256(tokenIdHex);
 
-        const poolRes = await ethCall(TOKENS.POS_MANAGER, `0x99fbab88${encodeUint256(tokenId)}`);
+        const poolRes = await ethCall(UNISWAP_V3_POLYGON.POS_MANAGER, `0x99fbab88${encodeUint256(tokenId)}`);
         if (!poolRes || poolRes === '0x') continue;
 
         const token0 = '0x' + poolRes.slice(154, 194).toLowerCase();
@@ -162,7 +162,7 @@ async function getPoolBalances(walletAddress) {
 
         if (liquidity === 0n) continue;
 
-        const poolAddrRes = await ethCall(TOKENS.FACTORY, `0x1698ee82${encodeAddress(token0)}${encodeAddress(token1)}${pad32(feeHex)}`);
+        const poolAddrRes = await ethCall(UNISWAP_V3_POLYGON.FACTORY, `0x1698ee82${encodeAddress(token0)}${encodeAddress(token1)}${pad32(feeHex)}`);
         const poolAddr = '0x' + poolAddrRes.slice(-40);
 
         const slot0 = await ethCall(poolAddr, '0x3850c7bd');
@@ -170,14 +170,14 @@ async function getPoolBalances(walletAddress) {
 
         const { amount0, amount1 } = await getUniswapV3Amounts(tickLower, tickUpper, liquidity, sqrtP);
 
-        const formatWeth = (amount) => amount / (10 ** TOKENS.WETH.decimals);
-        const formatWbtc = (amount) => amount / (10 ** TOKENS.WBTC.decimals);
+        const formatWeth = (amount) => amount / (10 ** POLYGON_TOKENS.WETH.decimals);
+        const formatWbtc = (amount) => amount / (10 ** POLYGON_TOKENS.WBTC.decimals);
 
-        if (token0 === normalizeAddress(TOKENS.WETH.address)) poolWeth += formatWeth(amount0);
-        else if (token1 === normalizeAddress(TOKENS.WETH.address)) poolWeth += formatWeth(amount1);
+        if (token0 === normalizeAddress(POLYGON_TOKENS.WETH.address)) poolWeth += formatWeth(amount0);
+        else if (token1 === normalizeAddress(POLYGON_TOKENS.WETH.address)) poolWeth += formatWeth(amount1);
 
-        if (token0 === normalizeAddress(TOKENS.WBTC.address)) poolWbtc += formatWbtc(amount0);
-        else if (token1 === normalizeAddress(TOKENS.WBTC.address)) poolWbtc += formatWbtc(amount1);
+        if (token0 === normalizeAddress(POLYGON_TOKENS.WBTC.address)) poolWbtc += formatWbtc(amount0);
+        else if (token1 === normalizeAddress(POLYGON_TOKENS.WBTC.address)) poolWbtc += formatWbtc(amount1);
     }
 
     return { poolWeth, poolWbtc };

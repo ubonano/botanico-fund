@@ -1,74 +1,31 @@
-const functions = require("firebase-functions");
-const { admin, db } = require("./config/firebase");
-const { getMarketPrices, getWalletBalances, getPoolBalances } = require("./services/blockchain");
-const { updateFundState, updateInvestors } = require("./services/firestore");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onRequest } = require("firebase-functions/v2/https");
+const { executeMarketSnapshot } = require("./services/snapshot");
 
 /**
- * Cloud Function expuesta por HTTP encargada de recolectar un pantallazo 
- * instantáneo (snapshot) del valor financiero general del fondo y de todos 
- * sus componentes descentralizados (DeFi/UniswapV3).
- * 
- * Recolecta métricas On-Chain nativas en Polygon, balance de billeteras en caliente, 
- * y calcula por acción (Shares NAV). Por su parte actualiza bases de datos Firestore con el 
- * estado más actualizado e iterando el total de sus accionistas / Inversores.
- * 
- * @param {functions.https.Request} req - Objeto del requerimiento HTTP enlazado que encapsula params o body.
- * @param {functions.Response} res - Objeto de respuesta HTTP para informar status, header o retornos raw.
- * @returns {Promise<void>} Termina de resolver dando retorno final e informativo a la API.
+ * Cloud Function programada (Pub/Sub) encargada de recolectar un pantallazo 
+ * instantáneo (snapshot) de forma recurrente cada 5 minutos.
  */
-exports.marketSnapshot = functions.https.onRequest(async (req, res) => {
+exports.marketSnapshotScheduled = onSchedule("every 5 minutes", async (event) => {
     try {
-        // Obtener la configuración del fondo desde Firestore para extraer la wallet
-        const configRef = db.collection("config").doc("fund");
-        const configSnap = await configRef.get();
-
-        if (!configSnap.exists) {
-            return res.status(400).send("No existe el documento de configuración en Firestore ('config/fund').");
-        }
-
-        const configData = configSnap.data();
-        const walletAddress = configData.walletAddress;
-
-        if (!walletAddress) {
-            return res.status(400).send("Falta configurar la 'walletAddress' en la colección 'config' documento 'fund'.");
-        }
-
-        // 1. Obtener la data volátil y valores (Blockchain & Oráculos DEX)
-        const prices = await getMarketPrices();
-        const { weth: wethWallet, wbtc: wbtcWallet, matic: maticWallet } = await getWalletBalances(walletAddress);
-        const { poolWeth, poolWbtc } = await getPoolBalances(walletAddress);
-
-        // Consolidados finales
-        const totalWeth = wethWallet + poolWeth;
-        const totalWbtc = wbtcWallet + poolWbtc;
-        const totalValueUsd = (totalWeth * prices.WETH) + (totalWbtc * prices.WBTC);
-
-        // Estructura de estadísticas unificadas  
-        const stats = {
-            prices,
-            wethWallet, wbtcWallet, maticWallet,
-            poolWeth, poolWbtc,
-            totalWeth, totalWbtc,
-            totalValueUsd
-        };
-
-        const timestamp = admin.firestore.FieldValue.serverTimestamp();
-
-        // 2. Transaccionar la actualización de base de datos a un Batch unificado.
-        const batch = db.batch();
-
-        const navs = await updateFundState(batch, stats, timestamp);
-        await updateInvestors(batch, navs, timestamp);
-
-        await batch.commit(); // Impacto atómico real sobre todo Firestore
-
-        // Salida limpia
-        const msg = `[Snapshot Complete] Total: $${totalValueUsd.toFixed(2)} | NAV: $${navs.navUsd.toFixed(4)}`;
-        console.log(msg);
-        res.status(200).send(msg);
-
+        const msg = await executeMarketSnapshot();
+        console.log("Ejecución programada exitosa:", msg);
     } catch (error) {
-        console.error("Error executing market snapshot:", error);
+        console.error("Error en la ejecución programada de market snapshot:", error);
+    }
+});
+
+/**
+ * Cloud Function expuesta por HTTP para permitir la ejecución manual del snapshot.
+ */
+exports.marketSnapshotManual = onRequest(async (req, res) => {
+    try {
+        const msg = await executeMarketSnapshot();
+        console.log("Ejecución manual exitosa:", msg);
+        res.status(200).send(msg);
+    } catch (error) {
+        console.error("Error en la ejecución manual de market snapshot:", error);
         res.status(500).send(`Error interno: ${error.message}`);
     }
 });
+

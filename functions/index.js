@@ -18,9 +18,19 @@ const { updateFundState, updateInvestors } = require("./services/firestore");
  */
 exports.marketSnapshot = functions.https.onRequest(async (req, res) => {
     try {
-        const walletAddress = req.query.walletAddress || req.body.walletAddress;
+        // Obtener la configuración del fondo desde Firestore para extraer la wallet
+        const configRef = db.collection("config").doc("fund");
+        const configSnap = await configRef.get();
+
+        if (!configSnap.exists) {
+            return res.status(400).send("No existe el documento de configuración en Firestore ('config/fund').");
+        }
+
+        const configData = configSnap.data();
+        const walletAddress = configData.walletAddress;
+
         if (!walletAddress) {
-            return res.status(400).send("Falta el parámetro 'walletAddress'");
+            return res.status(400).send("Falta configurar la 'walletAddress' en la colección 'config' documento 'fund'.");
         }
 
         // 1. Obtener la data volátil y valores (Blockchain & Oráculos DEX)

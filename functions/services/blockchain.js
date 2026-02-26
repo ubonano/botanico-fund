@@ -1,5 +1,5 @@
 const { RPC_POLYGON } = require('../secret/keys');
-const { DEXSCREENER_API, TOKENS, Q96 } = require('../config/constants');
+const { POOLS, TOKENS, Q96 } = require('../config/constants');
 const {
     normalizeAddress,
     encodeAddress,
@@ -48,17 +48,31 @@ async function ethCall(to, data) {
 // --- BLOCKCHAIN READS ---
 
 /**
- * Obtiene las cotizaciones más recientes de los pares objetivo definidos en la API utilizando Dexscreener.
+ * Obtiene las cotizaciones más recientes de los pares objetivo definidos en la API de Uniswap V3 (Polygon).
  * Utilizado para valorar el portafolio en términos de fiat USD.
  * 
  * @returns {Promise<Object>} Un diccionario con los símbolos de los tokens como claves y el precio USD como valores. Identificador (ej. { WETH: 2500.5, WBTC: 59000.0 })
  */
 async function getMarketPrices() {
-    const res = await fetch(DEXSCREENER_API);
-    const data = await res.json();
-    const prices = {};
-    data.pairs.forEach(p => { prices[p.baseToken.symbol] = parseFloat(p.priceUsd); });
-    return prices;
+    const [slot0Weth, slot0Wbtc] = await Promise.all([
+        ethCall(POOLS.WETH_USDT, '0x3850c7bd'), // function slot0()
+        ethCall(POOLS.WBTC_USDT, '0x3850c7bd')
+    ]);
+
+    const numQ96 = Number(Q96);
+    const sqrtWeth = Number(decodeUint256(slot0Weth.slice(2, 66)));
+    const sqrtWbtc = Number(decodeUint256(slot0Wbtc.slice(2, 66)));
+
+    const priceNativeWeth = (sqrtWeth / numQ96) ** 2;
+    const priceNativeWbtc = (sqrtWbtc / numQ96) ** 2;
+
+    const wethPrice = priceNativeWeth * (10 ** (TOKENS.WETH.decimals - TOKENS.USDT.decimals));
+    const wbtcPrice = priceNativeWbtc * (10 ** (TOKENS.WBTC.decimals - TOKENS.USDT.decimals));
+
+    return {
+        WETH: wethPrice,
+        WBTC: wbtcPrice
+    };
 }
 
 /**

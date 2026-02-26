@@ -1,4 +1,7 @@
-const DEXSCREENER_API = 'https://api.dexscreener.com/latest/dex/pairs/polygon/0xbb98b3d2b18aef63a3178023a920971cf5f29be4,0xa1cfb393607d1a6888d273b762832ed14c8b56b1';
+const POOLS = {
+    WETH_USDT: '0xbb98b3d2b18aef63a3178023a920971cf5f29be4', // Fee 0.05%
+    WBTC_USDT: '0xa1cfb393607d1a6888d273b762832ed14c8b56b1'  // Fee 0.3%
+};
 
 const TOKENS = {
     WETH: { address: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619', decimals: 18 },
@@ -11,7 +14,7 @@ const TOKENS = {
 const Q96 = BigInt(2) ** BigInt(96);
 
 module.exports = {
-    DEXSCREENER_API,
+    POOLS,
     TOKENS,
     Q96
 };

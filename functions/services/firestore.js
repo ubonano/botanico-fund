@@ -104,6 +104,13 @@ async function updateInvestors(batch, navs, timestamp) {
         const rWbtc = calculateRoi(curValWbtc, netWbtc);
         const rWeth = calculateRoi(curValWeth, netWeth);
 
+        const avgPurchaseUsd = parseFloat(data.avg_purchase_nav_usd || 0);
+        const avgPurchaseWbtc = parseFloat(data.avg_purchase_nav_wbtc || 0);
+        const avgPurchaseWeth = parseFloat(data.avg_purchase_nav_weth || 0);
+        const pnlUsd = parseFloat(data.total_realized_pnl_usd || 0);
+        const pnlWbtc = parseFloat(data.total_realized_pnl_wbtc || 0);
+        const pnlWeth = parseFloat(data.total_realized_pnl_weth || 0);
+
         const investorData = {
             current_shares: shares,
             net_investment_usd: netUsd,
@@ -111,7 +118,13 @@ async function updateInvestors(batch, navs, timestamp) {
             net_investment_weth: netWeth,
             roi_usd: rUsd,
             roi_wbtc: rWbtc,
-            roi_weth: rWeth
+            roi_weth: rWeth,
+            avg_purchase_nav_usd: avgPurchaseUsd,
+            avg_purchase_nav_wbtc: avgPurchaseWbtc,
+            avg_purchase_nav_weth: avgPurchaseWeth,
+            total_realized_pnl_usd: pnlUsd,
+            total_realized_pnl_wbtc: pnlWbtc,
+            total_realized_pnl_weth: pnlWeth
         };
 
         const invRef = invDoc.ref;

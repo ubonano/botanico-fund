@@ -35,18 +35,18 @@ exports.marketSnapshot = functions.https.onRequest(async (req, res) => {
 
         // 1. Obtener la data volátil y valores (Blockchain & Oráculos DEX)
         const prices = await getMarketPrices();
-        const { weth: wethWallet, wbtc: wbtcWallet, usdt: usdtWallet } = await getWalletBalances(walletAddress);
+        const { weth: wethWallet, wbtc: wbtcWallet, matic: maticWallet } = await getWalletBalances(walletAddress);
         const { poolWeth, poolWbtc } = await getPoolBalances(walletAddress);
 
         // Consolidados finales
         const totalWeth = wethWallet + poolWeth;
         const totalWbtc = wbtcWallet + poolWbtc;
-        const totalValueUsd = (totalWeth * prices.WETH) + (totalWbtc * prices.WBTC) + usdtWallet;
+        const totalValueUsd = (totalWeth * prices.WETH) + (totalWbtc * prices.WBTC);
 
         // Estructura de estadísticas unificadas  
         const stats = {
             prices,
-            wethWallet, wbtcWallet, usdtWallet,
+            wethWallet, wbtcWallet, maticWallet,
             poolWeth, poolWbtc,
             totalWeth, totalWbtc,
             totalValueUsd

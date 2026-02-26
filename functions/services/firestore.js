@@ -10,7 +10,7 @@ const { db } = require('../config/firebase');
  * @param {Object} stats.prices - Precios actuales de los tokens (ej. { WETH: 2500, WBTC: 60000 }).
  * @param {number} stats.wethWallet - Balance de WETH en la wallet.
  * @param {number} stats.wbtcWallet - Balance de WBTC en la wallet.
- * @param {number} stats.usdtWallet - Balance de USDT en la wallet.
+ * @param {number} stats.maticWallet - Balance de MATIC en la wallet.
  * @param {number} stats.poolWeth - Balance de WETH invertido en pools de liquidez.
  * @param {number} stats.poolWbtc - Balance de WBTC invertido en pools de liquidez.
  * @param {number} stats.totalWeth - Balance total de WETH (wallet + pools).
@@ -29,8 +29,13 @@ async function updateFundState(batch, stats, timestamp) {
     const totalShares = fundDocData.total_shares ? parseFloat(fundDocData.total_shares) : 0;
 
     const navUsd = totalShares > 0 ? stats.totalValueUsd / totalShares : 1.0;
-    const navWeth = totalShares > 0 ? stats.totalWeth / totalShares : (1.0 / stats.prices.WETH);
-    const navWbtc = totalShares > 0 ? stats.totalWbtc / totalShares : (1.0 / stats.prices.WBTC);
+
+    // Cross-Calculating total portfolio value in based assets
+    const totalValueEnWeth = stats.totalWeth + (stats.totalWbtc * (stats.prices.WBTC / stats.prices.WETH));
+    const navWeth = totalShares > 0 ? totalValueEnWeth / totalShares : (1.0 / stats.prices.WETH);
+
+    const totalValueEnWbtc = stats.totalWbtc + (stats.totalWeth * (stats.prices.WETH / stats.prices.WBTC));
+    const navWbtc = totalShares > 0 ? totalValueEnWbtc / totalShares : (1.0 / stats.prices.WBTC);
 
     const snapshotId = `${Date.now()}`;
     const fundSnapshotRef = db.collection('snapshots').doc(snapshotId);
@@ -41,8 +46,10 @@ async function updateFundState(batch, stats, timestamp) {
         nav_wbtc: navWbtc,
         total_shares: totalShares,
         total_value_usd: stats.totalValueUsd,
-        total_value_weth: stats.totalWeth,
-        total_value_wbtc: stats.totalWbtc,
+        total_value_weth: totalValueEnWeth,
+        total_value_wbtc: totalValueEnWbtc,
+        inventory_weth: stats.totalWeth,
+        inventory_wbtc: stats.totalWbtc,
     };
 
     batch.set(fundDocRef, { ...stateData, last_update_timestamp: timestamp }, { merge: true });
@@ -51,6 +58,7 @@ async function updateFundState(batch, stats, timestamp) {
         timestamp,
         price_weth: stats.prices.WETH,
         price_wbtc: stats.prices.WBTC,
+        balance_matic_wallet: stats.maticWallet,
         balance_weth_wallet: stats.wethWallet,
         balance_weth_pool: stats.poolWeth,
         balance_weth_total: stats.totalWeth,

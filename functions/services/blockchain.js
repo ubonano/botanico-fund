@@ -1,5 +1,5 @@
 const { RPC_POLYGON } = require('../secret/keys');
-const { POOLS, TOKENS, Q96 } = require('../config/constants');
+const { TOKENS, ORACLES, Q96 } = require('../config/constants');
 const {
     normalizeAddress,
     encodeAddress,
@@ -54,24 +54,16 @@ async function ethCall(to, data) {
  * @returns {Promise<Object>} Un diccionario con los símbolos de los tokens como claves y el precio USD como valores. Identificador (ej. { WETH: 2500.5, WBTC: 59000.0 })
  */
 async function getMarketPrices() {
-    const [slot0Weth, slot0Wbtc] = await Promise.all([
-        ethCall(POOLS.WETH_USDT, '0x3850c7bd'), // function slot0()
-        ethCall(POOLS.WBTC_USDT, '0x3850c7bd')
+    const [wethHex, wbtcHex] = await Promise.all([
+        ethCall(ORACLES.WETH, '0x50d25bcd'), // latestAnswer()
+        ethCall(ORACLES.WBTC, '0x50d25bcd')
     ]);
 
-    const numQ96 = Number(Q96);
-    const sqrtWeth = Number(decodeUint256(slot0Weth.slice(2, 66)));
-    const sqrtWbtc = Number(decodeUint256(slot0Wbtc.slice(2, 66)));
-
-    const priceNativeWeth = (sqrtWeth / numQ96) ** 2;
-    const priceNativeWbtc = (sqrtWbtc / numQ96) ** 2;
-
-    const wethPrice = priceNativeWeth * (10 ** (TOKENS.WETH.decimals - TOKENS.USDT.decimals));
-    const wbtcPrice = priceNativeWbtc * (10 ** (TOKENS.WBTC.decimals - TOKENS.USDT.decimals));
+    const formatPrice = (hex) => Number(BigInt(hex)) / 1e8; // Chainlink USD feeds have 8 decimals
 
     return {
-        WETH: wethPrice,
-        WBTC: wbtcPrice
+        WETH: formatPrice(wethHex),
+        WBTC: formatPrice(wbtcHex)
     };
 }
 
@@ -93,18 +85,21 @@ async function getERC20Balance(tokenAddress, walletAddress, decimals) {
 
 /**
  * Obtiene el total consolidado de saldos estáticos en la billetera de un fondo/usuario.
- * En resumen, consulta simultáneamente los contratos de WETH, WBTC y USDT para optimizar red.
+ * En resumen, consulta simultáneamente los contratos de WETH, WBTC y el balance de red (MATIC) para optimizar red.
  * 
  * @param {string} walletAddress - Dirección que se evaluará (Ej. Billetera multisig central del fondo).
- * @returns {Promise<{weth: number, wbtc: number, usdt: number}>} Balances formatedos de WETH, WBTC y USDT.
+ * @returns {Promise<{weth: number, wbtc: number, matic: number}>} Balances formatedos de WETH, WBTC y MATIC.
  */
 async function getWalletBalances(walletAddress) {
-    const [weth, wbtc, usdt] = await Promise.all([
+    const [weth, wbtc, maticHex] = await Promise.all([
         getERC20Balance(TOKENS.WETH.address, walletAddress, TOKENS.WETH.decimals),
         getERC20Balance(TOKENS.WBTC.address, walletAddress, TOKENS.WBTC.decimals),
-        getERC20Balance(TOKENS.USDT.address, walletAddress, TOKENS.USDT.decimals)
+        rpcCall('eth_getBalance', [walletAddress, 'latest'])
     ]);
-    return { weth, wbtc, usdt };
+
+    // MATIC (Native) uses 18 decimals
+    const matic = Number(BigInt(maticHex)) / 1e18;
+    return { weth, wbtc, matic };
 }
 
 /**

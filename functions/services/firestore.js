@@ -10,7 +10,8 @@ const { db } = require('../config/firebase');
  * @param {Object} stats.prices - Precios actuales de los tokens (ej. { WETH: 2500, WBTC: 60000 }).
  * @param {number} stats.wethWallet - Balance de WETH en la wallet.
  * @param {number} stats.wbtcWallet - Balance de WBTC en la wallet.
- * @param {number} stats.maticWallet - Balance de MATIC en la wallet.
+ * @param {number} stats.polWallet - Balance de POL (nativo) en la wallet.
+ * @param {number} stats.usdtWallet - Balance de USDT en la wallet (informativo, no parte del fondo).
  * @param {number} stats.poolWeth - Balance de WETH invertido en pools de liquidez.
  * @param {number} stats.poolWbtc - Balance de WBTC invertido en pools de liquidez.
  * @param {number} stats.totalWeth - Balance total de WETH (wallet + pools).
@@ -58,7 +59,9 @@ async function updateFundState(batch, stats, timestamp) {
         timestamp,
         price_weth: stats.prices.WETH,
         price_wbtc: stats.prices.WBTC,
-        balance_matic_wallet: stats.maticWallet,
+        price_pol: stats.prices.POL,
+        balance_pol_wallet: stats.polWallet,
+        balance_usdt_wallet: stats.usdtWallet,
         balance_weth_wallet: stats.wethWallet,
         balance_weth_pool: stats.poolWeth,
         balance_weth_total: stats.totalWeth,

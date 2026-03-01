@@ -54,16 +54,18 @@ async function ethCall(to, data) {
  * @returns {Promise<Object>} Un diccionario con los símbolos de los tokens como claves y el precio USD como valores. Identificador (ej. { WETH: 2500.5, WBTC: 59000.0 })
  */
 async function getMarketPrices() {
-    const [wethHex, wbtcHex] = await Promise.all([
+    const [wethHex, wbtcHex, polHex] = await Promise.all([
         ethCall(CHAINLINK_POLYGON.WETH_USD, '0x50d25bcd'), // latestAnswer()
-        ethCall(CHAINLINK_POLYGON.WBTC_USD, '0x50d25bcd')
+        ethCall(CHAINLINK_POLYGON.WBTC_USD, '0x50d25bcd'),
+        ethCall(CHAINLINK_POLYGON.MATIC_USD, '0x50d25bcd')
     ]);
 
     const formatPrice = (hex) => Number(BigInt(hex)) / 1e8; // Chainlink USD feeds have 8 decimals
 
     return {
         WETH: formatPrice(wethHex),
-        WBTC: formatPrice(wbtcHex)
+        WBTC: formatPrice(wbtcHex),
+        POL: formatPrice(polHex)
     };
 }
 
@@ -91,15 +93,16 @@ async function getERC20Balance(tokenAddress, walletAddress, decimals) {
  * @returns {Promise<{weth: number, wbtc: number, matic: number}>} Balances formatedos de WETH, WBTC y MATIC.
  */
 async function getWalletBalances(walletAddress) {
-    const [weth, wbtc, maticHex] = await Promise.all([
+    const [weth, wbtc, usdt, maticHex] = await Promise.all([
         getERC20Balance(POLYGON_TOKENS.WETH.address, walletAddress, POLYGON_TOKENS.WETH.decimals),
         getERC20Balance(POLYGON_TOKENS.WBTC.address, walletAddress, POLYGON_TOKENS.WBTC.decimals),
+        getERC20Balance(POLYGON_TOKENS.USDT.address, walletAddress, POLYGON_TOKENS.USDT.decimals),
         rpcCall('eth_getBalance', [walletAddress, 'latest'])
     ]);
 
-    // MATIC (Native) uses 18 decimals
+    // MATIC/POL (Native) uses 18 decimals
     const matic = Number(BigInt(maticHex)) / 1e18;
-    return { weth, wbtc, matic };
+    return { weth, wbtc, usdt, matic };
 }
 
 /**

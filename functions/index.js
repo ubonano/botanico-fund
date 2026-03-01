@@ -1,5 +1,5 @@
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { onRequest } = require("firebase-functions/v2/https");
+const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
 const { executeMarketSnapshot } = require("./services/snapshot");
 const { processCapitalMovement } = require("./services/movements");
 const { runHistoricalMigration } = require("./services/migration");
@@ -30,30 +30,25 @@ exports.marketSnapshotManual = onRequest(async (req, res) => {
         res.status(500).send(`Error interno: ${error.message}`);
     }
 });
+
 /**
- * Cloud Function expuesta por HTTP para procesar depósitos o retiros (DEPOSIT o WITHDRAWAL).
- * Body esperado: { "investorId": "string", "type": "DEPOSIT" | "WITHDRAWAL", "amountUsd": number }
+ * Cloud Function callable para procesar depósitos o retiros (DEPOSIT o WITHDRAWAL).
+ * Data esperada: { "investorId": "string", "type": "DEPOSIT" | "WITHDRAWAL", "amountUsd": number }
  */
-exports.processMovement = onRequest(async (req, res) => {
-    // Solo permitir método POST
-    if (req.method !== 'POST') {
-        res.status(405).send('Método no permitido. Use POST.');
-        return;
+exports.processMovement = onCall(async (request) => {
+    const { investorId, type, amountUsd } = request.data;
+
+    if (!investorId || !type || amountUsd === undefined) {
+        throw new HttpsError('invalid-argument',
+            'Faltan parámetros requeridos: investorId, type, amountUsd.');
     }
 
     try {
-        const { investorId, type, amountUsd } = req.body;
-
-        if (!investorId || !type || amountUsd === undefined) {
-            res.status(400).send('Faltan parámetros requeridos: investorId, type, amountUsd.');
-            return;
-        }
-
         const msg = await processCapitalMovement(investorId, type, amountUsd);
-        res.status(200).send(msg);
+        return { message: msg };
     } catch (error) {
-        console.error(`Error procesando movimiento:`, error);
-        res.status(500).send(`Error interno: ${error.message}`);
+        console.error('Error procesando movimiento:', error);
+        throw new HttpsError('internal', `Error interno: ${error.message}`);
     }
 });
 

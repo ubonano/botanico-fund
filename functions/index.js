@@ -3,6 +3,7 @@ const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https")
 const { executeMarketSnapshot } = require("./services/snapshot");
 const { processCapitalMovement } = require("./services/movements");
 const { runHistoricalMigration } = require("./services/migration");
+const { updateFundWallet } = require("./services/config");
 
 /**
  * Cloud Function programada (Pub/Sub) encargada de recolectar un pantallazo 
@@ -65,3 +66,20 @@ exports.migrateHistorical = onRequest(async (req, res) => {
         res.status(500).send(`Error interno: ${error.message}`);
     }
 });
+
+/**
+ * Cloud Function callable para actualizar la wallet del fondo.
+ * Data esperada: { "walletAddress": "0x..." }
+ */
+exports.updateWallet = onCall(async (request) => {
+    const { walletAddress } = request.data;
+
+    try {
+        const msg = await updateFundWallet(walletAddress);
+        return { message: msg };
+    } catch (error) {
+        console.error('Error actualizando wallet:', error);
+        throw new HttpsError('internal', `Error interno: ${error.message}`);
+    }
+});
+

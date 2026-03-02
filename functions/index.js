@@ -4,6 +4,7 @@ const { executeMarketSnapshot } = require("./services/snapshot");
 const { processCapitalMovement } = require("./services/movements");
 const { runHistoricalMigration } = require("./services/migration");
 const { updateFundWallet } = require("./services/config");
+const { createInvestor } = require("./services/investors");
 
 /**
  * Cloud Function programada (Pub/Sub) encargada de recolectar un pantallazo 
@@ -83,3 +84,23 @@ exports.updateWallet = onCall(async (request) => {
     }
 });
 
+/**
+ * Cloud Function callable para crear un nuevo inversor.
+ * Data esperada: { "firstName": "string", "lastName": "string" }
+ */
+exports.createInvestor = onCall(async (request) => {
+    const { firstName, lastName } = request.data;
+
+    if (!firstName || !lastName) {
+        throw new HttpsError('invalid-argument',
+            'Faltan parámetros requeridos: firstName, lastName.');
+    }
+
+    try {
+        const msg = await createInvestor(firstName, lastName);
+        return { message: msg };
+    } catch (error) {
+        console.error('Error creando inversor:', error);
+        throw new HttpsError('internal', `Error interno: ${error.message}`);
+    }
+});

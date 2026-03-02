@@ -86,18 +86,18 @@ exports.updateWallet = onCall(async (request) => {
 
 /**
  * Cloud Function callable para crear un nuevo inversor.
- * Data esperada: { "firstName": "string", "lastName": "string" }
+ * Data esperada: { "name": "string", "lastName": "string" }
  */
 exports.createInvestor = onCall(async (request) => {
-    const { firstName, lastName } = request.data;
+    const { name, lastName } = request.data;
 
-    if (!firstName || !lastName) {
+    if (!name || !lastName) {
         throw new HttpsError('invalid-argument',
-            'Faltan parámetros requeridos: firstName, lastName.');
+            'Faltan parámetros requeridos: name, lastName.');
     }
 
     try {
-        const msg = await createInvestor(firstName, lastName);
+        const msg = await createInvestor(name, lastName);
         return { message: msg };
     } catch (error) {
         console.error('Error creando inversor:', error);

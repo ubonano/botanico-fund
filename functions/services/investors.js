@@ -25,16 +25,16 @@ function generatePassword(email) {
  * 4. Crea el documento del inversor en la colección `investors/{uid}`.
  * 5. Crea el documento del usuario en la colección `users/{uid}` con role "investor".
  *
- * @param {string} firstName - Nombre del inversor.
+ * @param {string} name - Nombre del inversor.
  * @param {string} lastName - Apellido del inversor.
  * @returns {Promise<string>} Mensaje de confirmación con el email y uid creado.
  */
-async function createInvestor(firstName, lastName) {
-    if (!firstName || !lastName) {
-        throw new Error('Faltan parámetros requeridos: firstName y lastName.');
+async function createInvestor(name, lastName) {
+    if (!name || !lastName) {
+        throw new Error('Faltan parámetros requeridos: name y lastName.');
     }
 
-    const initial = firstName.trim().charAt(0).toLowerCase();
+    const initial = name.trim().charAt(0).toLowerCase();
     const last = lastName.trim().toLowerCase().replace(/\s+/g, '');
     const email = `${initial}${last}@botanico.fund`;
 
@@ -51,7 +51,7 @@ async function createInvestor(firstName, lastName) {
 
     const investorRef = db.collection('investors').doc(uid);
     batch.set(investorRef, {
-        first_name: firstName.trim(),
+        name: name.trim(),
         last_name: lastName.trim(),
         email,
         user_id: uid,

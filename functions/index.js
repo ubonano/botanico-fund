@@ -1,5 +1,6 @@
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { db } = require("./config/firebase");
 const { executeMarketSnapshot } = require("./services/snapshot");
 const { processCapitalMovement } = require("./services/movements");
 const { runHistoricalMigration } = require("./services/migration");
@@ -7,15 +8,23 @@ const { updateFundWallet } = require("./services/config");
 const { createInvestor } = require("./services/investors");
 
 /**
- * Verifica que el usuario esté autenticado.
- * Lanza HttpsError('unauthenticated') si no lo está.
+ * Verifica que el usuario esté autenticado y tenga rol 'admin'.
+ * Lanza HttpsError('unauthenticated') si no está autenticado.
+ * Lanza HttpsError('permission-denied') si no tiene rol admin.
  *
  * @param {object} request - El objeto request de una Cloud Function onCall.
  */
-function requireAuth(request) {
+async function requireAdmin(request) {
     if (!request.auth) {
         throw new HttpsError('unauthenticated',
             'Debe estar autenticado para ejecutar esta función.');
+    }
+
+    const userDoc = await db.collection('users').doc(request.auth.uid).get();
+
+    if (!userDoc.exists || userDoc.data().role !== 'admin') {
+        throw new HttpsError('permission-denied',
+            'Se requiere rol de administrador para ejecutar esta función.');
     }
 }
 
@@ -37,7 +46,7 @@ exports.marketSnapshotScheduled = onSchedule("every 5 minutes", async (event) =>
  * Requiere autenticación.
  */
 exports.manualSnapshot = onCall(async (request) => {
-    requireAuth(request);
+    await requireAdmin(request);
 
     try {
         const msg = await executeMarketSnapshot();
@@ -55,7 +64,7 @@ exports.manualSnapshot = onCall(async (request) => {
  * Data esperada: { "investorId": "string", "type": "DEPOSIT" | "WITHDRAWAL", "amountUsd": number }
  */
 exports.processMovement = onCall(async (request) => {
-    requireAuth(request);
+    await requireAdmin(request);
 
     const { investorId, type, amountUsd } = request.data;
 
@@ -78,7 +87,7 @@ exports.processMovement = onCall(async (request) => {
  * Requiere autenticación. Sólo debe ser llamada una vez.
  */
 exports.migrateHistorical = onCall(async (request) => {
-    requireAuth(request);
+    await requireAdmin(request);
 
     try {
         const msg = await runHistoricalMigration();
@@ -95,7 +104,7 @@ exports.migrateHistorical = onCall(async (request) => {
  * Data esperada: { "walletAddress": "0x..." }
  */
 exports.updateWallet = onCall(async (request) => {
-    requireAuth(request);
+    await requireAdmin(request);
 
     const { walletAddress } = request.data;
 
@@ -114,7 +123,7 @@ exports.updateWallet = onCall(async (request) => {
  * Data esperada: { "name": "string", "lastName": "string" }
  */
 exports.createInvestor = onCall(async (request) => {
-    requireAuth(request);
+    await requireAdmin(request);
 
     const { name, lastName } = request.data;
 

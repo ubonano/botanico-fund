@@ -1,10 +1,23 @@
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { executeMarketSnapshot } = require("./services/snapshot");
 const { processCapitalMovement } = require("./services/movements");
 const { runHistoricalMigration } = require("./services/migration");
 const { updateFundWallet } = require("./services/config");
 const { createInvestor } = require("./services/investors");
+
+/**
+ * Verifica que el usuario esté autenticado.
+ * Lanza HttpsError('unauthenticated') si no lo está.
+ *
+ * @param {object} request - El objeto request de una Cloud Function onCall.
+ */
+function requireAuth(request) {
+    if (!request.auth) {
+        throw new HttpsError('unauthenticated',
+            'Debe estar autenticado para ejecutar esta función.');
+    }
+}
 
 /**
  * Cloud Function programada (Pub/Sub) encargada de recolectar un pantallazo 
@@ -20,24 +33,30 @@ exports.marketSnapshotScheduled = onSchedule("every 5 minutes", async (event) =>
 });
 
 /**
- * Cloud Function expuesta por HTTP para permitir la ejecución manual del snapshot.
+ * Cloud Function callable para ejecutar manualmente un snapshot del mercado.
+ * Requiere autenticación.
  */
-exports.marketSnapshotManual = onRequest(async (req, res) => {
+exports.manualSnapshot = onCall(async (request) => {
+    requireAuth(request);
+
     try {
         const msg = await executeMarketSnapshot();
         console.log("Ejecución manual exitosa:", msg);
-        res.status(200).send(msg);
+        return { message: msg };
     } catch (error) {
         console.error("Error en la ejecución manual de market snapshot:", error);
-        res.status(500).send(`Error interno: ${error.message}`);
+        throw new HttpsError('internal', `Error interno: ${error.message}`);
     }
 });
 
 /**
  * Cloud Function callable para procesar depósitos o retiros (DEPOSIT o WITHDRAWAL).
+ * Requiere autenticación.
  * Data esperada: { "investorId": "string", "type": "DEPOSIT" | "WITHDRAWAL", "amountUsd": number }
  */
 exports.processMovement = onCall(async (request) => {
+    requireAuth(request);
+
     const { investorId, type, amountUsd } = request.data;
 
     if (!investorId || !type || amountUsd === undefined) {
@@ -55,24 +74,29 @@ exports.processMovement = onCall(async (request) => {
 });
 
 /**
- * Cloud Function expuesta por HTTP para procesar la migración histórica inicial.
- * Sólo debe ser llamada una vez.
+ * Cloud Function callable para ejecutar la migración histórica inicial.
+ * Requiere autenticación. Sólo debe ser llamada una vez.
  */
-exports.migrateHistorical = onRequest(async (req, res) => {
+exports.migrateHistorical = onCall(async (request) => {
+    requireAuth(request);
+
     try {
         const msg = await runHistoricalMigration();
-        res.status(200).send(msg);
+        return { message: msg };
     } catch (error) {
-        console.error(`Error en migracion:`, error);
-        res.status(500).send(`Error interno: ${error.message}`);
+        console.error(`Error en migración:`, error);
+        throw new HttpsError('internal', `Error interno: ${error.message}`);
     }
 });
 
 /**
  * Cloud Function callable para actualizar la wallet del fondo.
+ * Requiere autenticación.
  * Data esperada: { "walletAddress": "0x..." }
  */
 exports.updateWallet = onCall(async (request) => {
+    requireAuth(request);
+
     const { walletAddress } = request.data;
 
     try {
@@ -86,9 +110,12 @@ exports.updateWallet = onCall(async (request) => {
 
 /**
  * Cloud Function callable para crear un nuevo inversor.
+ * Requiere autenticación.
  * Data esperada: { "name": "string", "lastName": "string" }
  */
 exports.createInvestor = onCall(async (request) => {
+    requireAuth(request);
+
     const { name, lastName } = request.data;
 
     if (!name || !lastName) {

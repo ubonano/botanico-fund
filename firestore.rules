@@ -1,9 +1,19 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Solo usuarios autenticados pueden leer y escribir
+
+    // Función helper: verifica si el usuario tiene rol 'admin'
+    function isAdmin() {
+      return request.auth != null
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Regla global para todas las colecciones
     match /{document=**} {
-      allow read, write: if request.auth != null;
+      // Lectura: solo usuarios autenticados
+      allow read: if request.auth != null;
+      // Escritura: solo admins
+      allow write: if isAdmin();
     }
   }
 }

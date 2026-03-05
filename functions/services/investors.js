@@ -65,7 +65,7 @@ async function createInvestor(name, lastName) {
         total_realized_pnl_usd: 0,
         total_realized_pnl_wbtc: 0,
         total_realized_pnl_weth: 0,
-        commission_rate: 0,
+        commission_rate: 0.5,
     });
 
     const userRef = db.collection('users').doc(uid);

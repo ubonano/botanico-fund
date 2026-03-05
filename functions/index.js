@@ -6,6 +6,7 @@ const { processCapitalMovement } = require("./services/movements");
 const { runHistoricalMigration } = require("./services/migration");
 const { updateFundWallet } = require("./services/config");
 const { createInvestor } = require("./services/investors");
+const { processCommissions } = require("./services/commissions");
 
 /**
  * Verifica que el usuario esté autenticado y tenga rol 'admin'.
@@ -137,6 +138,30 @@ exports.createInvestor = onCall(async (request) => {
         return { message: msg };
     } catch (error) {
         console.error('Error creando inversor:', error);
+        throw new HttpsError('internal', `Error interno: ${error.message}`);
+    }
+});
+
+/**
+ * Cloud Function callable para procesar la carga de comisiones del fondo.
+ * Requiere autenticación.
+ * Data esperada: { "amountUsd": number }
+ */
+exports.processCommissions = onCall(async (request) => {
+    await requireAdmin(request);
+
+    const { amountUsd } = request.data;
+
+    if (amountUsd === undefined || typeof amountUsd !== 'number' || amountUsd <= 0) {
+        throw new HttpsError('invalid-argument',
+            'Se requiere el parámetro amountUsd (número mayor a 0).');
+    }
+
+    try {
+        const msg = await processCommissions(amountUsd);
+        return { message: msg };
+    } catch (error) {
+        console.error('Error procesando comisiones:', error);
         throw new HttpsError('internal', `Error interno: ${error.message}`);
     }
 });

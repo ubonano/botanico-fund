@@ -7,6 +7,7 @@ const { runHistoricalMigration } = require("./services/migration");
 const { updateFundWallet } = require("./services/config");
 const { createInvestor } = require("./services/investors");
 const { processCommissions } = require("./services/commissions");
+const { cleanupDuplicateSnapshots } = require("./services/cleanup");
 
 /**
  * Verifica que el usuario esté autenticado y tenga rol 'admin'.
@@ -162,6 +163,24 @@ exports.processCommissions = onCall(async (request) => {
         return { message: msg };
     } catch (error) {
         console.error('Error procesando comisiones:', error);
+        throw new HttpsError('internal', `Error interno: ${error.message}`);
+    }
+});
+
+/**
+ * Cloud Function callable para limpiar snapshots duplicados.
+ * Conserva solo el último snapshot de cada día y elimina el resto.
+ * Requiere autenticación y rol admin.
+ * Timeout extendido a 540s por el volumen de documentos.
+ */
+exports.cleanupSnapshots = onCall({ timeoutSeconds: 540 }, async (request) => {
+    await requireAdmin(request);
+
+    try {
+        const msg = await cleanupDuplicateSnapshots();
+        return { message: msg };
+    } catch (error) {
+        console.error('Error limpiando snapshots:', error);
         throw new HttpsError('internal', `Error interno: ${error.message}`);
     }
 });

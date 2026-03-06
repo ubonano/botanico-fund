@@ -38,8 +38,8 @@ async function updateFundState(batch, stats, timestamp) {
     const totalValueEnWbtc = stats.totalWbtc + (stats.totalWeth * (stats.prices.WETH / stats.prices.WBTC));
     const navWbtc = totalShares > 0 ? totalValueEnWbtc / totalShares : (1.0 / stats.prices.WBTC);
 
-    const snapshotId = `${Date.now()}`;
-    const fundSnapshotRef = db.collection('snapshots').doc(snapshotId);
+    const today = new Date().toISOString().split('T')[0];
+    const fundSnapshotRef = db.collection('snapshots').doc(today);
 
     const stateData = {
         nav_usd: navUsd,
@@ -141,7 +141,7 @@ async function updateInvestors(batch, navs, timestamp) {
             total_value_weth: curValWeth,
         };
 
-        const invSnapshotRef = invRef.collection('snapshots').doc(`${Date.now()}`);
+        const invSnapshotRef = invRef.collection('snapshots').doc(new Date().toISOString().split('T')[0]);
         batch.set(invSnapshotRef, snapshotData);
     });
 }

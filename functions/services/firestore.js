@@ -146,7 +146,97 @@ async function updateInvestors(batch, navs, timestamp) {
     });
 }
 
+/**
+ * Actualiza el estado del bot y guarda un snapshot diario en una colección separada.
+ * Similar a updateFundState pero aislado del cálculo de inversores/NAV.
+ * Lleva control de saldos, valor total y ROI general del bot.
+ *
+ * @param {FirebaseFirestore.WriteBatch} batch - Instancia del batch de Firestore.
+ * @param {Object} botStats - Métricas del bot desde la blockchain.
+ * @param {Object} botStats.prices - Precios actuales { WETH, WBTC, POL }.
+ * @param {number} botStats.wethWallet - WETH suelto en el contrato.
+ * @param {number} botStats.wbtcWallet - WBTC suelto en el contrato.
+ * @param {number} botStats.polWallet - POL (gas) en el contrato.
+ * @param {number} botStats.usdtWallet - USDT en el contrato.
+ * @param {number} botStats.poolWeth - WETH invertido en posición LP.
+ * @param {number} botStats.poolWbtc - WBTC invertido en posición LP.
+ * @param {number} botStats.totalWeth - WETH total (wallet + pool).
+ * @param {number} botStats.totalWbtc - WBTC total (wallet + pool).
+ * @param {number} botStats.totalValueUsd - Valor total en USD.
+ * @param {FirebaseFirestore.FieldValue} timestamp - Marca de tiempo del servidor.
+ * @returns {Promise<void>}
+ */
+async function updateBotSnapshot(batch, botStats, timestamp) {
+    const botStateRef = db.doc('bot_state/current');
+    const botStateSnap = await botStateRef.get();
+    const botStateData = botStateSnap.data() || {};
+
+    // ROI: comparar valor actual vs valor inicial
+    // El valor inicial se guarda la primera vez que se ejecuta el snapshot
+    let initialValueUsd = botStateData.initial_value_usd || 0;
+    let initialWeth = botStateData.initial_weth || 0;
+    let initialWbtc = botStateData.initial_wbtc || 0;
+
+    if (!botStateData.initial_value_usd && botStats.totalValueUsd > 0) {
+        // Primera ejecución: guardar como inversión inicial
+        initialValueUsd = botStats.totalValueUsd;
+        initialWeth = botStats.totalWeth;
+        initialWbtc = botStats.totalWbtc;
+    }
+
+    const calculateRoi = (current, initial) => initial > 0 ? (current - initial) / initial : 0;
+
+    // ROI en USD, WETH y WBTC
+    const roiUsd = calculateRoi(botStats.totalValueUsd, initialValueUsd);
+
+    // Valor total expresado en WETH y WBTC para ROI en esos términos
+    const totalValueWeth = botStats.totalWeth + (botStats.totalWbtc * (botStats.prices.WBTC / botStats.prices.WETH));
+    const totalValueWbtc = botStats.totalWbtc + (botStats.totalWeth * (botStats.prices.WETH / botStats.prices.WBTC));
+    const initialValueWeth = initialWeth + (initialWbtc * (botStats.prices.WBTC / botStats.prices.WETH));
+    const initialValueWbtc = initialWbtc + (initialWeth * (botStats.prices.WETH / botStats.prices.WBTC));
+    const roiWeth = calculateRoi(totalValueWeth, initialValueWeth);
+    const roiWbtc = calculateRoi(totalValueWbtc, initialValueWbtc);
+
+    const stateData = {
+        // Saldos actuales
+        balance_weth_wallet: botStats.wethWallet,
+        balance_wbtc_wallet: botStats.wbtcWallet,
+        balance_pol_wallet: botStats.polWallet,
+        balance_usdt_wallet: botStats.usdtWallet,
+        balance_weth_pool: botStats.poolWeth,
+        balance_wbtc_pool: botStats.poolWbtc,
+        balance_weth_total: botStats.totalWeth,
+        balance_wbtc_total: botStats.totalWbtc,
+        // Valores totales
+        total_value_usd: botStats.totalValueUsd,
+        total_value_weth: totalValueWeth,
+        total_value_wbtc: totalValueWbtc,
+        // Inversión inicial (se fija una vez)
+        initial_value_usd: initialValueUsd,
+        initial_weth: initialWeth,
+        initial_wbtc: initialWbtc,
+        // ROI
+        roi_usd: roiUsd,
+        roi_weth: roiWeth,
+        roi_wbtc: roiWbtc,
+        // Precios al momento
+        price_weth: botStats.prices.WETH,
+        price_wbtc: botStats.prices.WBTC,
+        price_pol: botStats.prices.POL,
+    };
+
+    // Estado actual del bot
+    batch.set(botStateRef, { ...stateData, last_update_timestamp: timestamp }, { merge: true });
+
+    // Snapshot diario
+    const today = new Date().toISOString().split('T')[0];
+    const botSnapshotRef = db.collection('bot_snapshots').doc(today);
+    batch.set(botSnapshotRef, { ...stateData, timestamp });
+}
+
 module.exports = {
     updateFundState,
-    updateInvestors
+    updateInvestors,
+    updateBotSnapshot
 };
+

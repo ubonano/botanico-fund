@@ -1,5 +1,6 @@
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
 const { db } = require("./config/firebase");
 const { executeMarketSnapshot } = require("./services/snapshot");
 const { processCapitalMovement } = require("./services/movements");
@@ -8,6 +9,10 @@ const { updateFundWallet } = require("./services/config");
 const { createInvestor } = require("./services/investors");
 const { processCommissions } = require("./services/commissions");
 const { cleanupDuplicateSnapshots } = require("./services/cleanup");
+const { executeBotCycle } = require("./services/botLiquidity");
+
+// Firebase Secret para la clave privada de la hot wallet del bot
+const hotWalletPrivateKey = defineSecret("HOT_WALLET_PRIVATE_KEY");
 
 /**
  * Verifica que el usuario esté autenticado y tenga rol 'admin'.
@@ -184,3 +189,20 @@ exports.cleanupSnapshots = onCall({ timeoutSeconds: 540 }, async (request) => {
         throw new HttpsError('internal', `Error interno: ${error.message}`);
     }
 });
+
+/**
+ * Cloud Function programada (Pub/Sub) encargada de vigilar y gestionar
+ * posiciones de liquidez concentrada en Uniswap V3 cada 1 minuto.
+ * Usa Firebase Secrets para la clave privada de la hot wallet.
+ */
+exports.botanicoBot = onSchedule(
+    { schedule: "every 2 minutes", timeoutSeconds: 120, secrets: [hotWalletPrivateKey] },
+    async (event) => {
+        try {
+            await executeBotCycle(hotWalletPrivateKey.value());
+            console.log("Ciclo BotanicoBot completado.");
+        } catch (error) {
+            console.error("Error en BotanicoBot scheduled:", error);
+        }
+    }
+);

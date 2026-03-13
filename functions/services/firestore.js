@@ -147,82 +147,79 @@ async function updateInvestors(batch, navs, timestamp) {
 }
 
 /**
- * Actualiza el estado del bot y guarda un snapshot diario en una colección separada.
- * Similar a updateFundState pero aislado del cálculo de inversores/NAV.
- * Lleva control de saldos, valor total y ROI general del bot.
+ * Actualiza el estado del bot y guarda un snapshot diario.
+ * Recibe datos desglosados en 3 componentes (idle, fees, pool) y calcula PnL bimonetario.
  *
  * @param {FirebaseFirestore.WriteBatch} batch - Instancia del batch de Firestore.
- * @param {Object} botStats - Métricas del bot desde la blockchain.
- * @param {Object} botStats.prices - Precios actuales { WETH, WBTC, POL }.
- * @param {number} botStats.wethWallet - WETH suelto en el contrato.
- * @param {number} botStats.wbtcWallet - WBTC suelto en el contrato.
- * @param {number} botStats.polWallet - POL (gas) en el contrato.
- * @param {number} botStats.usdtWallet - USDT en el contrato.
- * @param {number} botStats.poolWeth - WETH invertido en posición LP.
- * @param {number} botStats.poolWbtc - WBTC invertido en posición LP.
- * @param {number} botStats.totalWeth - WETH total (wallet + pool).
- * @param {number} botStats.totalWbtc - WBTC total (wallet + pool).
- * @param {number} botStats.totalValueUsd - Valor total en USD.
+ * @param {Object} botData - Datos desglosados del bot desde la blockchain.
+ * @param {Object} botData.idle - Balance líquido { weth, wbtc }.
+ * @param {Object} botData.fees - Comisiones pendientes { weth, wbtc }.
+ * @param {Object} botData.pool - Liquidez activa en pool { weth, wbtc }.
+ * @param {number} botData.totalWeth - WETH total (idle + fees + pool).
+ * @param {number} botData.totalWbtc - WBTC total (idle + fees + pool).
+ * @param {number} botData.poolPriceWbtcInWeth - Precio de 1 WBTC en WETH (del sqrtPriceX96).
+ * @param {boolean} botData.hasActivePosition - Si hay posición NFT activa.
+ * @param {Object} prices - Precios USD de Chainlink { WETH, WBTC, POL }.
  * @param {FirebaseFirestore.FieldValue} timestamp - Marca de tiempo del servidor.
  * @returns {Promise<void>}
  */
-async function updateBotSnapshot(batch, botStats, timestamp) {
+async function updateBotSnapshot(batch, botData, prices, timestamp) {
     const botStateRef = db.doc('bot_state/current');
     const botStateSnap = await botStateRef.get();
     const botStateData = botStateSnap.data() || {};
 
-    // ROI: comparar valor actual vs valor inicial
-    // El valor inicial se guarda la primera vez que se ejecuta el snapshot
-    let initialValueUsd = botStateData.initial_value_usd || 0;
+    // Base de comparación: se fija la primera vez que se ejecuta el snapshot
     let initialWeth = botStateData.initial_weth || 0;
     let initialWbtc = botStateData.initial_wbtc || 0;
 
-    if (!botStateData.initial_value_usd && botStats.totalValueUsd > 0) {
-        // Primera ejecución: guardar como inversión inicial
-        initialValueUsd = botStats.totalValueUsd;
-        initialWeth = botStats.totalWeth;
-        initialWbtc = botStats.totalWbtc;
+    if (!botStateData.initial_weth && botData.totalWeth > 0) {
+        initialWeth = botData.totalWeth;
+        initialWbtc = botData.totalWbtc;
     }
 
-    const calculateRoi = (current, initial) => initial > 0 ? (current - initial) / initial : 0;
+    // Deltas: diferencia actual vs base
+    const deltaWeth = botData.totalWeth - initialWeth;
+    const deltaWbtc = botData.totalWbtc - initialWbtc;
 
-    // ROI en USD, WETH y WBTC
-    const roiUsd = calculateRoi(botStats.totalValueUsd, initialValueUsd);
+    // PnL bimonetario usando precio del pool (P = cuántos WETH cuesta 1 WBTC)
+    const P = botData.poolPriceWbtcInWeth;
+    const pnlWeth = deltaWeth + (deltaWbtc * P);          // Rentabilidad neta en WETH
+    const pnlWbtc = P > 0 ? deltaWbtc + (deltaWeth / P) : 0;  // Rentabilidad neta en WBTC
 
-    // Valor total expresado en WETH y WBTC para ROI en esos términos
-    const totalValueWeth = botStats.totalWeth + (botStats.totalWbtc * (botStats.prices.WBTC / botStats.prices.WETH));
-    const totalValueWbtc = botStats.totalWbtc + (botStats.totalWeth * (botStats.prices.WETH / botStats.prices.WBTC));
-    const initialValueWeth = initialWeth + (initialWbtc * (botStats.prices.WBTC / botStats.prices.WETH));
-    const initialValueWbtc = initialWbtc + (initialWeth * (botStats.prices.WETH / botStats.prices.WBTC));
-    const roiWeth = calculateRoi(totalValueWeth, initialValueWeth);
-    const roiWbtc = calculateRoi(totalValueWbtc, initialValueWbtc);
+    // Valor total en USD
+    const totalValueUsd = (botData.totalWeth * prices.WETH) + (botData.totalWbtc * prices.WBTC);
 
     const stateData = {
-        // Saldos actuales
-        balance_weth_wallet: botStats.wethWallet,
-        balance_wbtc_wallet: botStats.wbtcWallet,
-        balance_pol_wallet: botStats.polWallet,
-        balance_usdt_wallet: botStats.usdtWallet,
-        balance_weth_pool: botStats.poolWeth,
-        balance_wbtc_pool: botStats.poolWbtc,
-        balance_weth_total: botStats.totalWeth,
-        balance_wbtc_total: botStats.totalWbtc,
-        // Valores totales
-        total_value_usd: botStats.totalValueUsd,
-        total_value_weth: totalValueWeth,
-        total_value_wbtc: totalValueWbtc,
-        // Inversión inicial (se fija una vez)
-        initial_value_usd: initialValueUsd,
+        // Componente 1: Balance líquido (tokens ociosos en el vault)
+        idle_weth: botData.idle.weth,
+        idle_wbtc: botData.idle.wbtc,
+        // Componente 2: Comisiones pendientes (uncollected fees del NFT)
+        fees_weth: botData.fees.weth,
+        fees_wbtc: botData.fees.wbtc,
+        // Componente 3: Liquidez activa en el pool
+        pool_weth: botData.pool.weth,
+        pool_wbtc: botData.pool.wbtc,
+        // Totales (idle + fees + pool)
+        total_weth: botData.totalWeth,
+        total_wbtc: botData.totalWbtc,
+        total_value_usd: totalValueUsd,
+        // Base de comparación (se fija una vez)
         initial_weth: initialWeth,
         initial_wbtc: initialWbtc,
-        // ROI
-        roi_usd: roiUsd,
-        roi_weth: roiWeth,
-        roi_wbtc: roiWbtc,
-        // Precios al momento
-        price_weth: botStats.prices.WETH,
-        price_wbtc: botStats.prices.WBTC,
-        price_pol: botStats.prices.POL,
+        // Deltas absolutos
+        delta_weth: deltaWeth,
+        delta_wbtc: deltaWbtc,
+        // PnL bimonetario
+        pnl_weth: pnlWeth,
+        pnl_wbtc: pnlWbtc,
+        // Precio del par desde el pool
+        pool_price_wbtc_in_weth: P,
+        // Estado de la posición
+        has_active_position: botData.hasActivePosition,
+        // Precios USD al momento (Chainlink)
+        price_weth: prices.WETH,
+        price_wbtc: prices.WBTC,
+        price_pol: prices.POL,
     };
 
     // Estado actual del bot

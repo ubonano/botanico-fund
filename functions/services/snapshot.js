@@ -1,6 +1,7 @@
 const { admin, db } = require("../config/firebase");
 const { getMarketPrices, getWalletBalances, getPoolBalances } = require("./blockchain");
 const { updateFundState, updateInvestors, updateBotSnapshot } = require("./firestore");
+const { getBotSnapshotData } = require("./botSnapshot");
 
 /**
  * Lógica central para obtener el snapshot del mercado y actualizar Firestore.
@@ -48,31 +49,14 @@ async function executeMarketSnapshot() {
     const navs = await updateFundState(batch, stats, timestamp);
     await updateInvestors(batch, navs, timestamp);
 
-    // 3. Snapshot del BOT DE LIQUIDEZ (si hay botAddress configurado)
+    // 3. Snapshot del BOT DE LIQUIDEZ (desglosado en idle + fees + pool)
     if (botAddress) {
         try {
-            const { weth: botWeth, wbtc: botWbtc, usdt: botUsdt, matic: botPol } = await getWalletBalances(botAddress);
-            const { poolWeth: botPoolWeth, poolWbtc: botPoolWbtc } = await getPoolBalances(botAddress);
+            const botData = await getBotSnapshotData();
+            await updateBotSnapshot(batch, botData, prices, timestamp);
 
-            const botTotalWeth = botWeth + botPoolWeth;
-            const botTotalWbtc = botWbtc + botPoolWbtc;
-            const botTotalValueUsd = (botTotalWeth * prices.WETH) + (botTotalWbtc * prices.WBTC);
-
-            const botStats = {
-                prices,
-                wethWallet: botWeth,
-                wbtcWallet: botWbtc,
-                polWallet: botPol,
-                usdtWallet: botUsdt,
-                poolWeth: botPoolWeth,
-                poolWbtc: botPoolWbtc,
-                totalWeth: botTotalWeth,
-                totalWbtc: botTotalWbtc,
-                totalValueUsd: botTotalValueUsd
-            };
-
-            await updateBotSnapshot(batch, botStats, timestamp);
-            console.log(`[Bot Snapshot] $${botTotalValueUsd.toFixed(2)} | WETH: ${botTotalWeth.toFixed(6)} | WBTC: ${botTotalWbtc.toFixed(8)}`);
+            const totalUsd = (botData.totalWeth * prices.WETH) + (botData.totalWbtc * prices.WBTC);
+            console.log(`[Bot Snapshot] $${totalUsd.toFixed(2)} | WETH: ${botData.totalWeth.toFixed(6)} (idle:${botData.idle.weth.toFixed(6)} fees:${botData.fees.weth.toFixed(6)} pool:${botData.pool.weth.toFixed(6)}) | WBTC: ${botData.totalWbtc.toFixed(8)} (idle:${botData.idle.wbtc.toFixed(8)} fees:${botData.fees.wbtc.toFixed(8)} pool:${botData.pool.wbtc.toFixed(8)})`);
         } catch (err) {
             console.error("[Bot Snapshot Error]", err);
             // No bloquear el snapshot principal si falla el del bot
@@ -87,3 +71,4 @@ async function executeMarketSnapshot() {
 module.exports = {
     executeMarketSnapshot
 };
+

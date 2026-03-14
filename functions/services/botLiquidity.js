@@ -12,6 +12,7 @@ const {
     VAULT_ADDRESS,
     TICK_SPACING,
     GRID_WIDTH,
+    MAX_WIDTH_MULTIPLIER,
     COOLDOWN_MINUTES
 } = require("../config/botConstants");
 const {
@@ -102,6 +103,23 @@ async function executeBotCycle(hotWalletPrivateKey) {
         console.log(`[⏱️ ${elapsed()}] Tick: ${currentTick} | TokenId: ${activeTokenId}`);
 
         // ---------------------------------------------------------
+        // MÓDULO DE MEMORIA: tickHistory (volatilidad reciente)
+        // ---------------------------------------------------------
+        const volRef = db.collection('botanico_state').doc('volatility');
+        const volDoc = await volRef.get();
+        let tickHistory = volDoc.exists ? (volDoc.data()?.tickHistory || []) : [];
+        tickHistory.push(currentTick);
+        while (tickHistory.length > 30) tickHistory.shift();
+        // Escritura no bloqueante (sin await)
+        volRef.set({ tickHistory }, { merge: true });
+
+        // ---------------------------------------------------------
+        // CÁLCULO DE ANCHO DINÁMICO
+        // ---------------------------------------------------------
+        const { finalWidth: dynamicWidth, tickRange, multiplier } = calculateDynamicWidth(tickHistory, GRID_WIDTH, TICK_SPACING);
+        console.log(`[📊 Volatilidad] Rango 1h: ${tickRange} ticks | Multiplicador: ${multiplier.toFixed(2)}x | Ancho Dinámico: ${dynamicWidth}`);
+
+        // ---------------------------------------------------------
         // LECTURA DE MEMORIA (ESTADO DE COOLDOWN)
         // ---------------------------------------------------------
         const stateRef = db.collection('botanico_state').doc('cooldown');
@@ -145,8 +163,35 @@ async function executeBotCycle(hotWalletPrivateKey) {
             console.log(`[⏱️ ${elapsed()}] Capital total: bal0=${totalBal0.toFixed(0)} | bal1=${totalBal1.toFixed(0)} | Liq: ${liquidity}`);
 
             // ¿Qué rango sería óptimo con TODO el capital?
-            const optimal = findOptimalRangeAndAmounts(currentTick, totalBal0, totalBal1, TICK_SPACING, GRID_WIDTH);
-            const rangeChanged = (optimal.tickLower !== tL || optimal.tickUpper !== tU);
+            const optimal = findOptimalRangeAndAmounts(currentTick, totalBal0, totalBal1, TICK_SPACING, dynamicWidth);
+            let rangeChanged = (optimal.tickLower !== tL || optimal.tickUpper !== tU);
+
+            // --- FILTRO DE TOLERANCIA (HISTÉRESIS) ---
+            if (rangeChanged && !isOutOfRange) {
+                const currentWidth = tU - tL;
+                const proposedWidth = optimal.tickUpper - optimal.tickLower;
+
+                // CASO A: La volatilidad baja y propone achicar el rango
+                if (proposedWidth < currentWidth) {
+                    // Solo aceptamos achicar si el nuevo rango es significativamente menor (al menos 30% más chico)
+                    const isSignificantShrink = proposedWidth <= (currentWidth * 0.70);
+
+                    if (!isSignificantShrink) {
+                        console.log(`[🛡️ TOLERANCIA] Contracción menor (Actual: ${currentWidth} -> Propuesto: ${proposedWidth}). Ignorando para ahorrar gas.`);
+                        rangeChanged = false;
+                    }
+                }
+                // CASO B: El ancho es el mismo o similar, pero propone un recentrado
+                else if (proposedWidth === currentWidth || proposedWidth > currentWidth) {
+                    const shiftDistance = Math.abs(optimal.tickLower - tL);
+                    // Solo aceptamos recentrar si el movimiento es mayor a 2 veces el TICK_SPACING (evita micro-ajustes)
+                    if (shiftDistance <= (TICK_SPACING * 2)) {
+                        console.log(`[🎯 TOLERANCIA] Micro-centrado de ${shiftDistance} ticks. Ignorando para ahorrar gas.`);
+                        rangeChanged = false;
+                    }
+                }
+            }
+            // ------------------------------------------------
 
             console.log(`[⏱️ ${elapsed()}] Rango óptimo: [${optimal.tickLower}, ${optimal.tickUpper}] | Cambió: ${rangeChanged}`);
 
@@ -157,9 +202,11 @@ async function executeBotCycle(hotWalletPrivateKey) {
                 } else {
                     if (bal0 > 0 || bal1 > 0) {
                         const inj = calculateInjection(currentTick, tL, tU, bal0, bal1);
-                        if (inj.exp0 > 1000 || inj.exp1 > 1000) {
+                        if (inj.exp0 > 100000 || inj.exp1 > 100000) {
                             console.log(`[⏱️ ${elapsed()}] Inyectando capital ocioso...`);
-                            const txInj = await vault.increasePositionLiquidity(0, 0, deadline, gasOverrides);
+                            const minAmt0Inj = BigInt(Math.floor(inj.exp0 * 0.99));
+                            const minAmt1Inj = BigInt(Math.floor(inj.exp1 * 0.99));
+                            const txInj = await vault.increasePositionLiquidity(minAmt0Inj, minAmt1Inj, deadline, gasOverrides);
                             console.log(`[⏱️ ${elapsed()}] TX Inyección enviada: ${txInj.hash}`);
                             await waitForTx(txInj, 'Inyección', elapsed);
                         }
@@ -167,21 +214,23 @@ async function executeBotCycle(hotWalletPrivateKey) {
                     return null;
                 }
             } else {
-                if (isOutOfRange) {
-                    const currentTime = Date.now();
-                    const minutesPassed = (currentTime - lastRebalanceTime) / (1000 * 60);
+                // Cooldown se evalúa SIEMPRE antes de closePosition (parche de seguridad)
+                const currentTime = Date.now();
+                const minutesPassed = (currentTime - lastRebalanceTime) / (1000 * 60);
 
-                    if (minutesPassed < COOLDOWN_MINUTES) {
-                        console.log(`[🛡️ COOLDOWN ACTIVO] ${minutesPassed.toFixed(1)}/${COOLDOWN_MINUTES} min. Rango óptimo: [${optimal.tickLower}, ${optimal.tickUpper}]`);
-                        return null;
-                    }
+                if (minutesPassed < COOLDOWN_MINUTES) {
+                    console.log(`[🛡️ COOLDOWN ACTIVO] ${minutesPassed.toFixed(1)}/${COOLDOWN_MINUTES} min. Rango óptimo: [${optimal.tickLower}, ${optimal.tickUpper}]. ${isOutOfRange ? 'Fuera de rango.' : 'En rango.'}`);
+                    return null;
                 }
 
                 precalculatedRange = optimal;
 
                 console.log(`[⏱️ ${elapsed()}] [🔄 REARMADO] [${tL}, ${tU}] → [${optimal.tickLower}, ${optimal.tickUpper}]. ${isOutOfRange ? 'Fuera de rango.' : 'Optimización.'}`);
                 console.log(`[⏱️ ${elapsed()}] Enviando closePosition...`);
-                const txClose = await vault.closePosition(0, 0, deadline, gasOverrides);
+                const closedAmounts = getPositionAmounts(currentTick, tL, tU, liquidity);
+                const minAmt0Close = BigInt(Math.floor(closedAmounts.amount0 * 0.99));
+                const minAmt1Close = BigInt(Math.floor(closedAmounts.amount1 * 0.99));
+                const txClose = await vault.closePosition(minAmt0Close, minAmt1Close, deadline, gasOverrides);
                 console.log(`[⏱️ ${elapsed()}] TX Close enviada: ${txClose.hash}`);
                 const closeReceipt = await waitForTx(txClose, 'Close', elapsed);
 
@@ -210,10 +259,12 @@ async function executeBotCycle(hotWalletPrivateKey) {
 
             if (bal0 === 0n && bal1 === 0n) return null;
 
-            const optimal = precalculatedRange || findOptimalRangeAndAmounts(currentTick, Number(bal0), Number(bal1), TICK_SPACING, GRID_WIDTH);
+            const optimal = precalculatedRange || findOptimalRangeAndAmounts(currentTick, Number(bal0), Number(bal1), TICK_SPACING, dynamicWidth);
 
             console.log(`[⏱️ ${elapsed()}] ${precalculatedRange ? '[📐 Precalculado]' : '[📐 Calculado]'} Abriendo [${optimal.tickLower}, ${optimal.tickUpper}]...`);
-            const txOpen = await vault.openPosition(optimal.tickLower, optimal.tickUpper, 0, 0, deadline, gasOverrides);
+            const minAmt0Open = BigInt(Math.floor(optimal.expectedAmount0 * 0.99));
+            const minAmt1Open = BigInt(Math.floor(optimal.expectedAmount1 * 0.99));
+            const txOpen = await vault.openPosition(optimal.tickLower, optimal.tickUpper, minAmt0Open, minAmt1Open, deadline, gasOverrides);
             console.log(`[⏱️ ${elapsed()}] TX Open enviada: ${txOpen.hash}`);
             const openReceipt = await waitForTx(txOpen, 'Open', elapsed);
 
@@ -365,6 +416,35 @@ function findOptimalRangeAndAmounts(currentTick, bal0, bal1, tickSpacing, width)
     return { tickLower: bestLower, tickUpper: bestLower + width, expectedAmount0: finalAmt0, expectedAmount1: finalAmt1 };
 }
 
+/**
+ * Calcula el ancho dinámico del rango basado en la volatilidad histórica.
+ * @param {number[]} tickHistory - Historial de ticks recientes (máx 30).
+ * @param {number} baseWidth - Ancho base (GRID_WIDTH).
+ * @param {number} tickSpacing - Tick spacing del pool.
+ * @returns {{ finalWidth: number, tickRange: number, multiplier: number }}
+ */
+function calculateDynamicWidth(tickHistory, baseWidth, tickSpacing) {
+    if (tickHistory.length < 5) {
+        return { finalWidth: baseWidth, tickRange: 0, multiplier: 1.0 };
+    }
+
+    const maxTick = Math.max(...tickHistory);
+    const minTick = Math.min(...tickHistory);
+    const tickRange = maxTick - minTick;
+
+    let multiplier = 1.0;
+    if (tickRange > baseWidth) {
+        multiplier = Math.min(tickRange / baseWidth, MAX_WIDTH_MULTIPLIER);
+    }
+
+    const targetWidth = baseWidth * multiplier;
+    let finalWidth = Math.ceil(targetWidth / tickSpacing) * tickSpacing;
+    if (finalWidth < baseWidth) finalWidth = baseWidth;
+
+    return { finalWidth, tickRange, multiplier };
+}
+
 module.exports = {
-    executeBotCycle
+    executeBotCycle,
+    calculateDynamicWidth
 };

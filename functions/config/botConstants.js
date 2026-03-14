@@ -14,8 +14,9 @@ const NPM_ADDRESS = "0xC36442b4a4522E871399CD717aBDD847Ab11FE88";
 // PARÁMETROS DE OPERACIÓN (Pool 0.05% fee)
 // ==========================================
 const TICK_SPACING = 10;    // Para el pool de 0.05%
-const GRID_WIDTH = 70;
-const COOLDOWN_MINUTES = 1; // Minutos de espera antes de permitir otro desarme destructivo
+const GRID_WIDTH = 50;
+const MAX_WIDTH_MULTIPLIER = 6; // Multiplicador máximo para el ancho dinámico (ej. 4 = hasta 4x GRID_WIDTH)
+const COOLDOWN_MINUTES = 5; // Minutos de espera antes de permitir otro desarme destructivo
 
 // ==========================================
 // TOKENS (direcciones y decimales en Polygon)
@@ -60,6 +61,7 @@ module.exports = {
     WBTC_DECIMALS,
     TICK_SPACING,
     GRID_WIDTH,
+    MAX_WIDTH_MULTIPLIER,
     COOLDOWN_MINUTES,
     VAULT_ABI,
     POOL_ABI,

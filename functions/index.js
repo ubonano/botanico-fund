@@ -206,3 +206,32 @@ exports.botanicoBot = onSchedule(
         }
     }
 );
+
+/**
+ * Cloud Function callable para encender/apagar el bot de liquidez.
+ * Requiere autenticación y rol admin.
+ * Data esperada: { "enabled": boolean }
+ * Retorna el estado actual del bot.
+ */
+exports.toggleBot = onCall(async (request) => {
+    await requireAdmin(request);
+
+    const { enabled } = request.data;
+
+    if (typeof enabled !== 'boolean') {
+        throw new HttpsError('invalid-argument',
+            'Se requiere el parámetro enabled (boolean).');
+    }
+
+    try {
+        const botConfigRef = db.collection('botanico_state').doc('bot_config');
+        await botConfigRef.set({ enabled, updatedAt: new Date().toISOString() }, { merge: true });
+
+        const status = enabled ? '🟢 ENCENDIDO' : '🔴 APAGADO';
+        console.log(`Bot de liquidez ${status} por admin ${request.auth.uid}`);
+        return { message: `Bot ${status}`, enabled };
+    } catch (error) {
+        console.error('Error toggling bot:', error);
+        throw new HttpsError('internal', `Error interno: ${error.message}`);
+    }
+});

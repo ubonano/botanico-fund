@@ -75,6 +75,18 @@ async function executeBotCycle(hotWalletPrivateKey) {
     const npm = getNpmContract(provider);
 
     try {
+        // ---------------------------------------------------------
+        // GUARD: Verificar si el bot está habilitado
+        // ---------------------------------------------------------
+        const botConfigRef = db.collection('botanico_state').doc('bot_config');
+        const botConfigDoc = await botConfigRef.get();
+        const botEnabled = botConfigDoc.exists ? (botConfigDoc.data()?.enabled !== false) : true;
+
+        if (!botEnabled) {
+            console.log(`[⏱️ ${elapsed()}] 🔴 Bot DESACTIVADO. Ciclo omitido.`);
+            return null;
+        }
+
         console.log(`[⏱️ ${elapsed()}] Iniciando ciclo...`);
 
         // Obtener fee data de la red para asegurar gas suficiente
